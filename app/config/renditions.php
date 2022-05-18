@@ -12,7 +12,7 @@ return [
     ],
     [
         'id'   => 2,
-        'name' => '720p',
+        'name' => '576p',
         'videoBitrate' => 2538,
         'audioBitrate' => 128,
         'width' => 1024,
@@ -20,7 +20,7 @@ return [
     ],
     [
         'id'   => 3,
-        'name' => '1080p',
+        'name' => '720p',
         'videoBitrate' => 3551,
         'audioBitrate' => 128,
         'width' => 1280,

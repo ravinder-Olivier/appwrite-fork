@@ -112,9 +112,9 @@ App::get('/v1/video/bucket/:bucketId/file/:fileId')
         }
 
         $sourceDir   = 'tests/video_tmp_in/';
-        $sourceFile  =  'large-file.mp4' ;
+        $sourceFile  =  'in2.MOV' ;
         $sourcePath  =  $sourceDir . $sourceFile;
-        $destDir     = 'tests/video_tmp_out/';
+        $destDir     = 'tests/video_tmp_out/'. $fileId;
 
         $ffmpeg = Streaming\FFMpeg::create([]);
         $ffprobe = FFMpeg\FFProbe::create([]);
@@ -126,7 +126,8 @@ App::get('/v1/video/bucket/:bucketId/file/:fileId')
         $ffprobe = FFMpeg\FFProbe::create();
         $width = $ffprobe->streams($sourcePath)->videos()->first()->get('width');
         $height = $ffprobe->streams($sourcePath)->videos()->first()->get('height');
-        $bitrate = $ffprobe->streams($sourcePath)->videos()->first()->get('bit_rate');
+        $bitrateKb = $ffprobe->streams($sourcePath)->videos()->first()->get('bit_rate');
+        $bitrateMb =  $bitrateKb*1000;
         $duration = $ffprobe->streams($sourcePath)->videos()->first()->get('duration');
 
         $renditions = [];
@@ -146,7 +147,7 @@ App::get('/v1/video/bucket/:bucketId/file/:fileId')
 
         $video->hls()
             ->setFormat($format)
-            ->setHlsBaseUrl('http://127.0.0.1/videos')
+            ->setHlsBaseUrl('')
             ->setHlsTime(5)
             ->setHlsAllowCache(false)
             ->addRepresentations($renditions)
@@ -154,21 +155,6 @@ App::get('/v1/video/bucket/:bucketId/file/:fileId')
 
 
 
-//        foreach (Config::getParam('renditions', []) as $rendition) {
-//            $format = new FFMpeg\Format\Video\X264();
-//            $format->on('progress', function ($video, $format, $percentage) {
-//                echo "$percentage % transcoded";
-//            });
-//
-//            $format
-//                ->setKiloBitrate($rendition['videoBitrate'])
-//                ->setAudioKiloBitrate($rendition['audioBitrate']);
-//            $video
-//                ->filters()
-//                ->resize(new FFMpeg\Coordinate\Dimension($rendition['width'], $rendition['height']))
-//                ->synchronize();
-//            $video->save($format, $path . $rendition['name'].'.mp4');
-//        }
 
         $response->json(['result' => 'ok5']);
     });

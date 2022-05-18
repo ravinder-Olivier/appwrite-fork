@@ -84,7 +84,7 @@ trait StorageBase
         ];
         $id = '';
         while (!feof($handle)) {
-            $curlFile = new \CURLFile('data://' . $mimeType . ';base64,' . base64_encode(@fread($handle, $chunkSize)), $mimeType, 'large-file.mp4');
+            $curlFile = new \CURLFile('data://' . $mimeType . ';base64,' . base64_encode(@fread($handle, $chunkSize)), $mimeType, 'in1.mp4');
             $headers['content-range'] = 'bytes ' . ($counter * $chunkSize) . '-' . min(((($counter * $chunkSize) + $chunkSize) - 1), $size) . '/' . $size;
             if(!empty($id)) {
                 $headers['x-appwrite-id'] = $id;
@@ -103,7 +103,7 @@ trait StorageBase
         $this->assertEquals(201, $largeFile['headers']['status-code']);
         $this->assertNotEmpty($largeFile['body']['$id']);
         $this->assertIsInt($largeFile['body']['dateCreated']);
-        $this->assertEquals('large-file.mp4', $largeFile['body']['name']);
+        $this->assertEquals('in1.mp4', $largeFile['body']['name']);
         $this->assertEquals('video/mp4', $largeFile['body']['mimeType']);
         $this->assertEquals($totalSize, $largeFile['body']['sizeOriginal']);
         $this->assertEquals(md5_file(realpath(__DIR__ . '/../../../resources/disk-a/large-file.mp4')), $largeFile['body']['signature']); // should validate that the file is not encrypted
@@ -125,7 +125,7 @@ trait StorageBase
             'x-appwrite-project' => $this->getProject()['$id']
         ];
         $id = '';
-        $curlFile = new \CURLFile('data://' . $mimeType . ';base64,' . base64_encode(@fread($handle, $chunkSize)), $mimeType, 'large-file.mp4');
+        $curlFile = new \CURLFile('data://' . $mimeType . ';base64,' . base64_encode(@fread($handle, $chunkSize)), $mimeType, 'in1.mp4');
         $headers['content-range'] = 'bytes ' . ($counter * $chunkSize) . '-' . min(((($counter * $chunkSize) + $chunkSize) - 1), $size) . '/' . $size;
         $res = $this->client->call(Client::METHOD_POST, '/storage/buckets/' . $bucket2['body']['$id'] . '/files',  $this->getHeaders(), [
             'fileId' => $fileId,
@@ -421,7 +421,7 @@ trait StorageBase
         ], $this->getHeaders()));
         $fileData = $file7['body'];
         $this->assertEquals(200, $file7['headers']['status-code']);
-        $this->assertEquals('attachment; filename="large-file.mp4"', $file7['headers']['content-disposition']);
+        $this->assertEquals('attachment; filename="in1.mp4"', $file7['headers']['content-disposition']);
         $this->assertEquals('video/mp4', $file7['headers']['content-type']);
         $this->assertNotEmpty($fileData);
         $this->assertEquals(md5_file(realpath(__DIR__ . '/../../../resources/disk-a/large-file.mp4')), md5($fileData)); // validate the file is downloaded correctly
