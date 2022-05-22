@@ -126,7 +126,7 @@ class TranscodingV1 extends Worker
                 $path = $deviceFiles->getPath($this->args['fileId']);
                 $path = str_ireplace($deviceFiles->getRoot(), $deviceFiles->getRoot() . DIRECTORY_SEPARATOR . $bucket->getId(), $path); // Add bucket id to path after root
                 $data = $this->getFilesDevice($project->getId())->read($this->outDir. $fileName);
-                $this->getVideoDevice($project->getId())->write($path. DIRECTORY_SEPARATOR . $fileName, $data, \mime_content_type($path. DIRECTORY_SEPARATOR . $fileName));
+                $this->getVideoDevice($project->getId())->write($path. DIRECTORY_SEPARATOR . $fileName, $data, \mime_content_type($this->outDir. $fileName));
 
                 //$metadata=[];
                 //$chunksUploaded = $deviceFiles->upload($file, $path, -1, 1, $metadata);
