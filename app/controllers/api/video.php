@@ -5,6 +5,7 @@ use Appwrite\ClamAV\Network;
 use Appwrite\Event\Audit;
 use Appwrite\Event\Delete;
 use Appwrite\Event\Event;
+use Appwrite\Event\Transcoding;
 use Appwrite\Utopia\Database\Validator\CustomId;
 use Appwrite\OpenSSL\OpenSSL;
 use Appwrite\Stats\Stats;
@@ -67,6 +68,7 @@ App::get('/v1/video/bucket/:bucketId/file/:fileId')
     ->inject('request')
     ->inject('response')
     ->inject('dbForProject')
+    ->inject('project')
     ->inject('user')
     ->inject('audits')
     ->inject('usage')
@@ -74,7 +76,9 @@ App::get('/v1/video/bucket/:bucketId/file/:fileId')
     ->inject('mode')
     ->inject('deviceFiles')
     ->inject('deviceLocal')
-    ->action(action: function (string $bucketId, string $fileId, ?array $read, ?array $write, Request $request, Response $response, Database $dbForProject, Document $user, Audit $audits, Stats $usage, Event $events, string $mode, Device $deviceFiles, Device $deviceLocal) {
+    ->action(action: function (string $bucketId, string $fileId, ?array $read, ?array $write, Request $request, Response $response, Database $dbForProject, $project, Document $user, Audit $audits, Stats $usage, Event $events, string $mode, Device $deviceFiles, Device $deviceLocal) {
+        /** @var Utopia\Database\Document $project */
+        /** @var Utopia\Database\Document $user */
 
         $bucket = Authorization::skip(fn () => $dbForProject->getDocument('buckets', $bucketId));
 
@@ -111,50 +115,65 @@ App::get('/v1/video/bucket/:bucketId/file/:fileId')
             }
         }
 
-        $sourceDir   = 'tests/video_tmp_in/';
-        $sourceFile  =  'in2.MOV' ;
-        $sourcePath  =  $sourceDir . $sourceFile;
-        $destDir     = 'tests/video_tmp_out/'. $fileId;
-
-        $ffmpeg = Streaming\FFMpeg::create([]);
-        $ffprobe = FFMpeg\FFProbe::create([]);
-
-        //$ffprobe->isValid($filePath); // returns bool
-
-        $renditions = Config::getParam('renditions', []);
-
-        $ffprobe = FFMpeg\FFProbe::create();
-        $width = $ffprobe->streams($sourcePath)->videos()->first()->get('width');
-        $height = $ffprobe->streams($sourcePath)->videos()->first()->get('height');
-        $bitrateKb = $ffprobe->streams($sourcePath)->videos()->first()->get('bit_rate');
-        $bitrateMb =  $bitrateKb*1000;
-        $duration = $ffprobe->streams($sourcePath)->videos()->first()->get('duration');
-
-        $renditions = [];
-        foreach (Config::getParam('renditions', []) as $rendition) {
-            $renditions[] = (new Representation)->
-            setKiloBitrate($rendition['videoBitrate'])->
-            setAudioKiloBitrate($rendition['audioBitrate'])->
-            setResize($rendition['width'], $rendition['height']);
-        }
-
-
-        $video = $ffmpeg->open($sourcePath);
-        $format = new Streaming\Format\X264();
-        $format->on('progress', function ($video, $format, $percentage){
-            echo sprintf("\rTranscoding...(%s%%) [%s%s]", $percentage, str_repeat('#', $percentage), str_repeat('-', (100 - $percentage)));
-        });
-
-        $video->hls()
-            ->setFormat($format)
-            ->setHlsBaseUrl('')
-            ->setHlsTime(5)
-            ->setHlsAllowCache(false)
-            ->addRepresentations($renditions)
-            ->save($destDir);
+        $transcoder = new Transcoding();
+        $transcoder
+            ->setUser($user)
+            ->setProject($project)
+            ->setBucketId($bucketId)
+            ->setFileId($fileId)
+            ->trigger();
 
 
 
+//        $sourceDir   = 'tests/video_tmp_in/';
+//        $sourceFile  =  'in2.MOV' ;
+//        $sourcePath  =  $sourceDir . $sourceFile;
+//        $destDir     = 'tests/video_tmp_out/'. $fileId;
+//
+//        $ffmpeg = Streaming\FFMpeg::create([]);
+//        $ffprobe = FFMpeg\FFProbe::create([]);
+//
+//        //$ffprobe->isValid($filePath); // returns bool
+//
+//        $renditions = Config::getParam('renditions', []);
+//
+//        $ffprobe = FFMpeg\FFProbe::create();
+//        $width = $ffprobe->streams($sourcePath)->videos()->first()->get('width');
+//        $height = $ffprobe->streams($sourcePath)->videos()->first()->get('height');
+//        $bitrateKb = $ffprobe->streams($sourcePath)->videos()->first()->get('bit_rate');
+//        $bitrateMb =  $bitrateKb*1000;
+//        $duration = $ffprobe->streams($sourcePath)->videos()->first()->get('duration');
+//
+//        $renditions = [];
+//        foreach (Config::getParam('renditions', []) as $rendition) {
+//            $renditions[] = (new Representation)->
+//            setKiloBitrate($rendition['videoBitrate'])->
+//            setAudioKiloBitrate($rendition['audioBitrate'])->
+//            setResize($rendition['width'], $rendition['height']);
+//
+//        }
+//
+//
+//        $video = $ffmpeg->open($sourcePath);
+//        $format = new Streaming\Format\X264();
+//        $format->on('progress', function ($video, $format, $percentage) use ($destDir){
+//            if($percentage % 10 === 0) {
+//                file_put_contents($destDir . '_progress.txt', $percentage . PHP_EOL, FILE_APPEND | LOCK_EX);
+//            }
+//            //echo sprintf("\rTranscoding...(%s%%) [%s%s]", $percentage, str_repeat('#', $percentage), str_repeat('-', (100 - $percentage)));
+//        });
+//
+//        $video->hls()
+//            ->setFormat($format)
+//            ->setHlsBaseUrl('')
+//            ->setFlags(['single_file'])
+//            ->setHlsTime(5)
+//            ->setHlsAllowCache(false)
+//            ->addRepresentations($renditions)
+//            ->save($destDir);
 
-        $response->json(['result' => 'ok5']);
+
+
+        $response->noContent();
+        //$response->json(['result' => 'ok']);
     });

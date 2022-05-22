@@ -81,7 +81,7 @@ services:
       - ./psalm.xml:/usr/src/code/psalm.xml
       - ./tests:/usr/src/code/tests
       - ./app:/usr/src/code/app
-      - ./vendor:/usr/src/code/vendor
+      - ./vendor:/usr/src/code/vendor #TODO remove when done!!
       - ./docs:/usr/src/code/docs
       - ./public:/usr/src/code/public
       - ./src:/usr/src/code/src
@@ -222,6 +222,11 @@ services:
     volumes:
       - ./app:/usr/src/code/app
       - ./src:/usr/src/code/src
+      - appwrite-uploads:/storage/uploads:rw
+      - appwrite-video:/storage/video:rw
+      - ./tests:/usr/src/code/tests #TODO remove when done!!
+      - ./vendor:/usr/src/code/vendor #TODO remove when done!!
+
     depends_on:
       - redis
       - mariadb
