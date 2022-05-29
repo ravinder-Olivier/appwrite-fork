@@ -11,7 +11,6 @@ use Utopia\Database\Document;
 use Utopia\Database\Validator\Authorization;
 use \FFMpeg\FFProbe\DataMapping\StreamCollection;
 use Utopia\Storage\Compression\Algorithms\GZIP;
-
 require_once __DIR__ . '/../init.php';
 
 Console::title('Transcoding V1 Worker');
@@ -84,60 +83,84 @@ class TranscodingV1 extends Worker
         $ffmpeg = Streaming\FFMpeg::create([]);
 
         $valid = $ffprobe->isValid($inPath);
-
         $sourceInfo = $this->getVideoInfo($ffprobe->streams($inPath));
-        $renditions = [];
-        foreach (Config::getParam('renditions', []) as $rendition) {
-            $renditions[] = (new Representation)->
-            setKiloBitrate($rendition['videoBitrate'])->
-            setAudioKiloBitrate($rendition['audioBitrate'])->
-            setResize($rendition['width'], $rendition['height']);
-
-        }
 
         $video = $ffmpeg->open($inPath);
-        $format = new Streaming\Format\X264();
-        $path = $this->outDir;
-        $format->on('progress', function ($video, $format, $percentage) use ($path){
-            file_put_contents($path . 'progress_row.txt', $percentage . PHP_EOL, FILE_APPEND | LOCK_EX);
-            if($percentage % 3 === 0) {
-                file_put_contents($path . 'progress.txt', $percentage . PHP_EOL, FILE_APPEND | LOCK_EX);
-            }
-        });
+        $renditions = [];
 
-        $video->hls()
-            #->setSegSubDirectory('ts')
-            ->setFormat($format)
-            ->setAdditionalParams(['-vf', 'scale=iw:-2:force_original_aspect_ratio=increase,setsar=1:1'])
-            ->setHlsBaseUrl('')
-            #->setFlags(['single_file'])
-            ->setHlsTime(5)
-            ->setHlsAllowCache(false)
-            ->addRepresentations($renditions)
-            ->save($this->outPath);
+        foreach (Config::getParam('renditions', []) as $rendition) {
+            $representation = (new Representation)->
+                    setKiloBitrate($rendition['videoBitrate'])->
+                    setAudioKiloBitrate($rendition['audioBitrate'])->
+                    setResize($rendition['width'], $rendition['height']);
 
-          $deviceFiles  = $this->getVideoDevice($project->getId());
+                $format = new Streaming\Format\X264();
+                $path = $this->outDir;
+                $progressFileName = 'progress'. $rendition['width'] .'X'. $rendition['height'] .'@'. $rendition['videoBitrate'].'.txt';
+                $format->on('progress', function ($video, $format, $percentage) use ($path, $progressFileName){
+                    //file_put_contents($path . $progressFileName, $percentage . PHP_EOL, FILE_APPEND | LOCK_EX);
+            });
 
-        if ($handle = opendir($this->outDir)) {
-            while (false !== ($fileName = readdir($handle))) {
-                if ('.' === $fileName) continue;
-                if ('..' === $fileName) continue;
+            /** Create HLS */
+            $video->hls()
+                ->setFormat($format)
+                ->setAdditionalParams(['-vf', 'scale=iw:-2:force_original_aspect_ratio=increase,setsar=1:1'])
+                ->setHlsBaseUrl('')
+                #->setFlags(['single_file'])
+                ->setHlsTime(10)
+                ->setHlsAllowCache(false)
+                ->addRepresentations([$representation])
+                ->save($this->outPath);
 
-                $path = $deviceFiles->getPath($this->args['fileId']);
-                $path = str_ireplace($deviceFiles->getRoot(), $deviceFiles->getRoot() . DIRECTORY_SEPARATOR . $bucket->getId(), $path); // Add bucket id to path after root
+            /** m3u8 master playlist */
+            $renditions[] = $rendition;
+            $m3u8 = $this->getHlsMasterPlaylist($renditions, $this->args['fileId']);
+            file_put_contents($this->outDir . $this->args['fileId'].'.m3u8', $m3u8, LOCK_EX);
+
+            /** Upload files **/
+            $fileNames = scandir($this->outDir);
+            foreach($fileNames as $fileName) {
+
+                if($fileName === '.' || $fileName === '..'){
+                    continue;
+                }
+
+                $deviceFiles  = $this->getVideoDevice($project->getId());
+                $devicePath = $deviceFiles->getPath($this->args['fileId']);
+                $devicePath = str_ireplace($deviceFiles->getRoot(), $deviceFiles->getRoot() . DIRECTORY_SEPARATOR . $bucket->getId(), $devicePath);
                 $data = $this->getFilesDevice($project->getId())->read($this->outDir. $fileName);
-                $this->getVideoDevice($project->getId())->write($path. DIRECTORY_SEPARATOR . $fileName, $data, \mime_content_type($this->outDir. $fileName));
+                $this->getVideoDevice($project->getId())->write($devicePath. DIRECTORY_SEPARATOR . $fileName, $data, \mime_content_type($this->outDir. $fileName));
 
                 //$metadata=[];
                 //$chunksUploaded = $deviceFiles->upload($file, $path, -1, 1, $metadata);
                 //var_dump($chunksUploaded);
-//                 if (empty($chunksUploaded)) {
-//                    throw new Exception('Failed uploading file', 500, Exception::GENERAL_SERVER_ERROR);
-//                  }
+                // if (empty($chunksUploaded)) {
+                //  throw new Exception('Failed uploading file', 500, Exception::GENERAL_SERVER_ERROR);
+                //}
+                // }
+                @unlink($this->outDir. $fileName);
             }
-            closedir($handle);
         }
     }
+
+    /**
+     * @param $renditions array
+     * @param string $path
+     * @return string
+     */
+    private function getHlsMasterPlaylist(array $renditions, string $path): string
+    {
+        $m3u8 = '#EXTM3U'. PHP_EOL . '#EXT-X-VERSION:3'. PHP_EOL;
+        foreach ($renditions as $rendition) {
+            $m3u8 .= '#EXT-X-STREAM-INF:BANDWIDTH=' .
+                (($rendition['videoBitrate']+$rendition['audioBitrate'])*1024) .
+                ',RESOLUTION=' . $rendition['width'] . 'x'. $rendition['height'] .
+                ',NAME="' . $rendition['height'] . '"' . PHP_EOL .
+                 $path . '_' . $rendition['height']. 'p.m3u8' . PHP_EOL;
+        }
+        return $m3u8;
+    }
+
 
     /**
      * @param $streams StreamCollection
