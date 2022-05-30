@@ -2835,9 +2835,9 @@ $collections = [
         ]
     ],
     'videos' => [
-        '$collection' => 'buckets',
+        '$collection' => 'video_renditions',
         '$id' => 'video_renditions',
-        '$name' => 'video_renditions',
+        '$name' => 'Video_renditions',
         'attributes' => [
             [
                 '$id' => 'bucketId',
@@ -2918,12 +2918,12 @@ $collections = [
             ],
             [
                 '$id' => 'status',
-                'type' => Database::VAR_INTEGER,
+                'type' => Database::VAR_STRING,
                 'format' => '',
-                'size' => 8,
-                'signed' => false,
+                'size' => 100,
+                'signed' => true,
                 'required' => false,
-                'default' => 0,
+                'default' => null,
                 'array' => false,
                 'filters' => [],
             ],

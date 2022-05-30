@@ -20,15 +20,17 @@ class TranscodingV1 extends Worker
 {
     protected array $errors = [];
 
-    protected string $basePath = 'tests/tmp/';
+    protected string $basePath = '/tmp/';
 
     protected string $inDir;
 
     protected string $outDir;
 
+    protected string $outPath;
+
     public function getName(): string
     {
-        return "transcoding";
+        return "Transcoding";
     }
 
     public function init(): void
@@ -77,7 +79,7 @@ class TranscodingV1 extends Worker
             $data = $compressor->decompress($data);
         }
 
-        $this->getFilesDevice($project->getId())->write('/usr/src/code/'. $this->inDir. $fileName, $data, $file->getAttribute('mimeType'));
+        $this->getFilesDevice($project->getId())->write($this->inDir. $fileName, $data, $file->getAttribute('mimeType'));
 
         $ffprobe = FFMpeg\FFProbe::create([]);
         $ffmpeg = Streaming\FFMpeg::create([]);
@@ -87,26 +89,38 @@ class TranscodingV1 extends Worker
 
         $video = $ffmpeg->open($inPath);
         $renditions = [];
+        /** renditions loop */
 
         foreach (Config::getParam('renditions', []) as $rendition) {
+            $query = Authorization::skip(function () use($database, $bucket, $rendition) {
+                return $database->createDocument('bucket_' . $bucket->getInternalId() . '_video_renditions', new Document([
+                    'bucketId' => $this->args['bucketId'],
+                    'fileId' => $this->args['fileId'],
+                    'renditionId' => $rendition['id'],
+                    'renditionName' => $rendition['name'],
+                    'timeStarted' => time(),
+                    'metadata' => json_encode([
+                        'width' => $rendition['width'],
+                        'height' => $rendition['height'],
+                        'videoBitrate' => $rendition['videoBitrate']
+                    ]),
+                    'status' => 'transcoding started',
+                ]));
+            });
+
             $representation = (new Representation)->
                     setKiloBitrate($rendition['videoBitrate'])->
                     setAudioKiloBitrate($rendition['audioBitrate'])->
                     setResize($rendition['width'], $rendition['height']);
 
                 $format = new Streaming\Format\X264();
-                $path = $this->outDir;
-                $progressFileName = 'progress'. $rendition['width'] .'X'. $rendition['height'] .'@'. $rendition['videoBitrate'].'.txt';
-                $format->on('progress', function ($video, $format, $percentage) use ($path, $progressFileName){
-                    //file_put_contents($path . $progressFileName, $percentage . PHP_EOL, FILE_APPEND | LOCK_EX);
-            });
+                $format->on('progress', function ($video, $format, $percentage) use ($database){});
 
             /** Create HLS */
-            $video->hls()
+            $hls = $video->hls()
                 ->setFormat($format)
                 ->setAdditionalParams(['-vf', 'scale=iw:-2:force_original_aspect_ratio=increase,setsar=1:1'])
                 ->setHlsBaseUrl('')
-                #->setFlags(['single_file'])
                 ->setHlsTime(10)
                 ->setHlsAllowCache(false)
                 ->addRepresentations([$representation])
@@ -117,7 +131,27 @@ class TranscodingV1 extends Worker
             $m3u8 = $this->getHlsMasterPlaylist($renditions, $this->args['fileId']);
             file_put_contents($this->outDir . $this->args['fileId'].'.m3u8', $m3u8, LOCK_EX);
 
-            /** Upload files **/
+            $metadata = $hls->metadata()->export();
+            if(!empty($metadata['stream']['resolutions'][0])){
+                $info = $metadata['stream']['resolutions'][0];
+                $query->setAttribute('metadata', json_encode([
+                    'resolution'    => $info['dimension'],
+                    'videoBitrate' => $info['video_kilo_bitrate'],
+                    'audioBitrate' => $info['audio_kilo_bitrate'],
+                ]));
+            }
+
+            $query->setAttribute('status', 'transcoding ended');
+            $query->setAttribute('timeEnded', time());
+            Authorization::skip(fn () => $database->updateDocument(
+                'bucket_' . $bucket->getInternalId() . '_video_renditions',
+                $query->getId(),
+                $query
+                ));
+
+
+            /** Upload & remove files **/
+            $start = 0;
             $fileNames = scandir($this->outDir);
             foreach($fileNames as $fileName) {
 
@@ -126,10 +160,20 @@ class TranscodingV1 extends Worker
                 }
 
                 $deviceFiles  = $this->getVideoDevice($project->getId());
-                $devicePath = $deviceFiles->getPath($this->args['fileId']);
-                $devicePath = str_ireplace($deviceFiles->getRoot(), $deviceFiles->getRoot() . DIRECTORY_SEPARATOR . $bucket->getId(), $devicePath);
+                $devicePath   = $deviceFiles->getPath($this->args['fileId']);
+                $devicePath   = str_ireplace($deviceFiles->getRoot(), $deviceFiles->getRoot() . DIRECTORY_SEPARATOR . $bucket->getId(), $devicePath);
                 $data = $this->getFilesDevice($project->getId())->read($this->outDir. $fileName);
                 $this->getVideoDevice($project->getId())->write($devicePath. DIRECTORY_SEPARATOR . $fileName, $data, \mime_content_type($this->outDir. $fileName));
+
+                if($start === 0){
+                    $query->setAttribute('status', 'uploading');
+                    Authorization::skip(fn () => $database->updateDocument(
+                       'bucket_' . $bucket->getInternalId() . '_video_renditions',
+                       $query->getId(),
+                       $query
+                    ));
+                   $start = 1;
+                }
 
                 //$metadata=[];
                 //$chunksUploaded = $deviceFiles->upload($file, $path, -1, 1, $metadata);
@@ -138,8 +182,16 @@ class TranscodingV1 extends Worker
                 //  throw new Exception('Failed uploading file', 500, Exception::GENERAL_SERVER_ERROR);
                 //}
                 // }
+
                 @unlink($this->outDir. $fileName);
             }
+
+            $query->setAttribute('status', 'ready');
+            Authorization::skip(fn () => $database->updateDocument(
+                'bucket_' . $bucket->getInternalId() . '_video_renditions',
+                $query->getId(),
+                $query
+            ));
         }
     }
 
