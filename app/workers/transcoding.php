@@ -18,6 +18,9 @@ Console::success(APP_NAME . ' transcoding worker v1 has started');
 
 class TranscodingV1 extends Worker
 {
+
+    const HLS_BASE_URL = '';
+
     protected array $errors = [];
 
     protected string $basePath = '/tmp/';
@@ -28,10 +31,12 @@ class TranscodingV1 extends Worker
 
     protected string $outPath;
 
+
     public function getName(): string
     {
         return "Transcoding";
     }
+
 
     public function init(): void
     {
@@ -120,7 +125,7 @@ class TranscodingV1 extends Worker
             $hls = $video->hls()
                 ->setFormat($format)
                 ->setAdditionalParams(['-vf', 'scale=iw:-2:force_original_aspect_ratio=increase,setsar=1:1'])
-                ->setHlsBaseUrl('')
+                ->setHlsBaseUrl(self::HLS_BASE_URL)
                 ->setHlsTime(10)
                 ->setHlsAllowCache(false)
                 ->addRepresentations([$representation])
