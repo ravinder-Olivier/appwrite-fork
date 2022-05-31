@@ -158,6 +158,7 @@ class TranscodingV1 extends Worker
             /** Upload & remove files **/
             $start = 0;
             $fileNames = scandir($this->outDir);
+            
             foreach($fileNames as $fileName) {
 
                 if($fileName === '.' || $fileName === '..'){
