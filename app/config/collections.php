@@ -2927,6 +2927,17 @@ $collections = [
                 'array' => false,
                 'filters' => [],
             ],
+            [
+                '$id' => 'progress',
+                'type' => Database::VAR_STRING,
+                'format' => '',
+                'size' => 4,
+                'signed' => true,
+                'required' => false,
+                'default' => null,
+                'array' => false,
+                'filters' => [],
+            ],
         ],
         'indexes' => [
             [

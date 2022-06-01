@@ -101,8 +101,10 @@ class TranscodingV1 extends Worker
 
         foreach (Config::getParam('renditions', []) as $rendition) {
 
-            $query = Authorization::skip(function () use($database, $bucket, $rendition) {
-                return $database->createDocument('bucket_' . $bucket->getInternalId() . '_video_renditions', new Document([
+            $collection = 'bucket_' . $bucket->getInternalId() . '_video_renditions';
+
+            $query = Authorization::skip(function () use($database, $collection, $rendition) {
+                return $database->createDocument($collection, new Document([
                     'bucketId' => $this->args['bucketId'],
                     'fileId' => $this->args['fileId'],
                     'renditionId' => $rendition['id'],
@@ -119,7 +121,15 @@ class TranscodingV1 extends Worker
                         setResize($rendition['width'], $rendition['height']);
 
                     $format = new Streaming\Format\X264();
-                    $format->on('progress', function ($video, $format, $percentage) use ($database){});
+                    $format->on('progress', function ($video, $format, $percentage) use ($database, $query, $collection){
+                        var_dump($percentage);
+                        $query->setAttribute('progress', (string)$percentage);
+                        Authorization::skip(fn () => $database->updateDocument(
+                            $collection,
+                            $query->getId(),
+                            $query
+                        ));
+                    });
 
                 /** Create HLS */
                 $hls = $video->hls()
@@ -149,11 +159,10 @@ class TranscodingV1 extends Worker
                 $query->setAttribute('status', 'transcoding ended');
                 $query->setAttribute('timeEnded', time());
                 Authorization::skip(fn () => $database->updateDocument(
-                    'bucket_' . $bucket->getInternalId() . '_video_renditions',
+                    $collection,
                     $query->getId(),
                     $query
                     ));
-
 
                 /** Upload & remove files **/
                 $start = 0;
@@ -174,7 +183,7 @@ class TranscodingV1 extends Worker
                     if($start === 0){
                         $query->setAttribute('status', 'uploading');
                         Authorization::skip(fn () => $database->updateDocument(
-                           'bucket_' . $bucket->getInternalId() . '_video_renditions',
+                            $collection,
                            $query->getId(),
                            $query
                         ));
@@ -194,7 +203,7 @@ class TranscodingV1 extends Worker
 
                 $query->setAttribute('status', 'ready');
                 Authorization::skip(fn () => $database->updateDocument(
-                    'bucket_' . $bucket->getInternalId() . '_video_renditions',
+                    $collection,
                     $query->getId(),
                     $query
                 ));
@@ -208,7 +217,7 @@ class TranscodingV1 extends Worker
 
                 $query->setAttribute('status', 'error');
                 Authorization::skip(fn() => $database->updateDocument(
-                    'bucket_' . $bucket->getInternalId() . '_video_renditions',
+                    $collection,
                     $query->getId(),
                     $query
                 ));
@@ -241,7 +250,6 @@ class TranscodingV1 extends Worker
      */
     private function getVideoInfo(StreamCollection $streams): array
     {
-
         return [
             'duration' => $streams->videos()->first()->get('duration'),
             'height' => $streams->videos()->first()->get('height'),

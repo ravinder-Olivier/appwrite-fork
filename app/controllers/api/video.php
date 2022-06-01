@@ -44,25 +44,14 @@ use Utopia\Swoole\Request;
 use Streaming\Representation;
 
 
-
-App::get('/v1/video/buckets/:bucketId/files/:fileId')
+App::post('/v1/video/buckets/:bucketId/files/:fileId')
     ->alias('/v1/video/files', ['bucketId' => 'default'])
     ->desc('Start transcoding video')
     ->groups(['api', 'storage'])
     ->label('scope', 'files.write')
 //    ->label('event', 'buckets.[bucketId].files.[fileId].create')
-//    ->label('sdk.auth', [APP_AUTH_TYPE_SESSION, APP_AUTH_TYPE_KEY, APP_AUTH_TYPE_JWT])
-//    ->label('sdk.namespace', 'storage')
-//    ->label('sdk.method', 'createFile')
-//    ->label('sdk.description', '/docs/references/storage/create-file.md')
-//    ->label('sdk.request.type', 'multipart/form-data')
-//    ->label('sdk.methodType', 'upload')
-//    ->label('sdk.response.code', Response::STATUS_CODE_CREATED)
-//    ->label('sdk.response.type', Response::CONTENT_TYPE_JSON)
-//    ->label('sdk.response.model', Response::MODEL_FILE)
     ->param('bucketId', null, new UID(), 'Storage bucket unique ID. You can create a new storage bucket using the Storage service [server integration](/docs/server/storage#createBucket).')
     ->param('fileId', '', new CustomId(), 'File ID. Choose your own unique ID or pass the string "unique()" to auto generate it. Valid chars are a-z, A-Z, 0-9, period, hyphen, and underscore. Can\'t start with a special char. Max length is 36 chars.')
-//    ->param('file', [], new File(), 'Binary file.', false)
     ->param('read', null, new Permissions(), 'An array of strings with read permissions. By default only the current user is granted with read permissions. [learn more about permissions](https://appwrite.io/docs/permissions) and get a full list of available permissions.', true)
     ->param('write', null, new Permissions(), 'An array of strings with write permissions. By default only the current user is granted with write permissions. [learn more about permissions](https://appwrite.io/docs/permissions) and get a full list of available permissions.', true)
     ->inject('request')
@@ -123,57 +112,61 @@ App::get('/v1/video/buckets/:bucketId/files/:fileId')
             ->setFileId($fileId)
             ->trigger();
 
+        $response->json(['result' => 'ok']);
+    });
 
 
-//        $sourceDir   = 'tests/video_tmp_in/';
-//        $sourceFile  =  'in2.MOV' ;
-//        $sourcePath  =  $sourceDir . $sourceFile;
-//        $destDir     = 'tests/video_tmp_out/'. $fileId;
-//
-//        $ffmpeg = Streaming\FFMpeg::create([]);
-//        $ffprobe = FFMpeg\FFProbe::create([]);
-//
-//        //$ffprobe->isValid($filePath); // returns bool
-//
-//        $renditions = Config::getParam('renditions', []);
-//
-//        $ffprobe = FFMpeg\FFProbe::create();
-//        $width = $ffprobe->streams($sourcePath)->videos()->first()->get('width');
-//        $height = $ffprobe->streams($sourcePath)->videos()->first()->get('height');
-//        $bitrateKb = $ffprobe->streams($sourcePath)->videos()->first()->get('bit_rate');
-//        $bitrateMb =  $bitrateKb*1000;
-//        $duration = $ffprobe->streams($sourcePath)->videos()->first()->get('duration');
-//
-//        $renditions = [];
-//        foreach (Config::getParam('renditions', []) as $rendition) {
-//            $renditions[] = (new Representation)->
-//            setKiloBitrate($rendition['videoBitrate'])->
-//            setAudioKiloBitrate($rendition['audioBitrate'])->
-//            setResize($rendition['width'], $rendition['height']);
-//
-//        }
-//
-//
-//        $video = $ffmpeg->open($sourcePath);
-//        $format = new Streaming\Format\X264();
-//        $format->on('progress', function ($video, $format, $percentage) use ($destDir){
-//            if($percentage % 10 === 0) {
-//                file_put_contents($destDir . '_progress.txt', $percentage . PHP_EOL, FILE_APPEND | LOCK_EX);
-//            }
-//            //echo sprintf("\rTranscoding...(%s%%) [%s%s]", $percentage, str_repeat('#', $percentage), str_repeat('-', (100 - $percentage)));
-//        });
-//
-//        $video->hls()
-//            ->setFormat($format)
-//            ->setHlsBaseUrl('')
-//            ->setFlags(['single_file'])
-//            ->setHlsTime(5)
-//            ->setHlsAllowCache(false)
-//            ->addRepresentations($renditions)
-//            ->save($destDir);
+App::get('/v1/video/buckets/:bucketId/files/:fileId/renditions')
+    ->alias('/v1/storage/files/:fileId/renditions', ['bucketId' => 'default'])
+    ->desc('Get File renditions')
+    ->groups(['api', 'storage'])
+    ->label('scope', 'files.read')
+    ->label('sdk.auth', [APP_AUTH_TYPE_SESSION, APP_AUTH_TYPE_KEY, APP_AUTH_TYPE_JWT])
+    ->label('sdk.namespace', 'storage')
+    ->label('sdk.method', 'getFile')
+    ->label('sdk.description', '/docs/references/storage/get-file.md')
+    ->label('sdk.response.code', Response::STATUS_CODE_OK)
+    ->label('sdk.response.type', Response::CONTENT_TYPE_JSON)
+    ->label('sdk.response.model', Response::MODEL_FILE)
+    ->param('bucketId', null, new UID(), 'Storage bucket unique ID. You can create a new storage bucket using the Storage service [server integration](/docs/server/storage#createBucket).')
+    ->param('fileId', '', new UID(), 'File ID.')
+    ->inject('response')
+    ->inject('dbForProject')
+    ->inject('usage')
+    ->inject('mode')
+    ->action(function (string $bucketId, string $fileId, Response $response, Database $dbForProject, Stats $usage, string $mode) {
 
+        $bucket = Authorization::skip(fn () => $dbForProject->getDocument('buckets', $bucketId));
 
+        if (
+            $bucket->isEmpty()
+            || (!$bucket->getAttribute('enabled') && $mode !== APP_MODE_ADMIN)
+        ) {
+            throw new Exception('Bucket not found', 404, Exception::STORAGE_BUCKET_NOT_FOUND);
+        }
 
-        $response->noContent();
-        //$response->json(['result' => 'ok']);
+        // Check bucket permissions when enforced
+        if ($bucket->getAttribute('permission') === 'bucket') {
+            $validator = new Authorization('read');
+            if (!$validator->isValid($bucket->getRead())) {
+                throw new Exception('Unauthorized permissions', 401, Exception::USER_UNAUTHORIZED);
+            }
+        }
+
+        if ($bucket->getAttribute('permission') === 'bucket') {
+            $file = Authorization::skip(fn () => $dbForProject->getDocument('bucket_' . $bucket->getInternalId(), $fileId));
+        } else {
+            $file = $dbForProject->getDocument('bucket_' . $bucket->getInternalId(), $fileId);
+        }
+
+        if ($file->isEmpty() || $file->getAttribute('bucketId') !== $bucketId) {
+            throw new Exception('File not found', 404, Exception::STORAGE_FILE_NOT_FOUND);
+        }
+
+        $usage
+            ->setParam('storage.files.read', 1)
+            ->setParam('bucketId', $bucketId)
+        ;
+
+        $response->dynamic($file, Response::MODEL_FILE);
     });
