@@ -108,11 +108,6 @@ class TranscodingV1 extends Worker
                     'renditionId' => $rendition['id'],
                     'renditionName' => $rendition['name'],
                     'timeStarted' => time(),
-                    'metadata' => json_encode([
-                        'width' => $rendition['width'],
-                        'height' => $rendition['height'],
-                        'videoBitrate' => $rendition['videoBitrate']
-                    ]),
                     'status' => 'transcoding started',
                 ]));
             });

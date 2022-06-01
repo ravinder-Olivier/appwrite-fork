@@ -45,7 +45,7 @@ use Streaming\Representation;
 
 
 
-App::get('/v1/video/bucket/:bucketId/file/:fileId')
+App::get('/v1/video/buckets/:bucketId/files/:fileId')
     ->alias('/v1/video/files', ['bucketId' => 'default'])
     ->desc('Start transcoding video')
     ->groups(['api', 'storage'])
