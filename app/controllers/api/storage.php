@@ -39,7 +39,7 @@ use Utopia\Validator\Integer;
 use Utopia\Validator\Range;
 use Utopia\Validator\Text;
 use Utopia\Validator\WhiteList;
-use Utopia\Swoole\Request; 
+use Utopia\Swoole\Request;
 
 App::post('/v1/storage/buckets')
     ->desc('Create bucket')
@@ -294,8 +294,7 @@ App::put('/v1/storage/buckets/:bucketId')
                 ->setAttribute('enabled', (bool) filter_var($enabled, FILTER_VALIDATE_BOOLEAN))
                 ->setAttribute('encryption', (bool) filter_var($encryption, FILTER_VALIDATE_BOOLEAN))
                 ->setAttribute('permission', $permission)
-                ->setAttribute('antivirus', (bool) filter_var($antivirus, FILTER_VALIDATE_BOOLEAN))
-        );
+                ->setAttribute('antivirus', (bool) filter_var($antivirus, FILTER_VALIDATE_BOOLEAN)));
 
         $audits
             ->setResource('storage/buckets/' . $bucket->getId())
@@ -397,8 +396,10 @@ App::post('/v1/storage/buckets/:bucketId/files')
     ->action(function (string $bucketId, string $fileId, array $file, ?array $read, ?array $write, Request $request, Response $response, Database $dbForProject, Document $user, Audit $audits, Stats $usage, Event $events, string $mode, Device $deviceFiles, Device $deviceLocal) {
         $bucket = Authorization::skip(fn () => $dbForProject->getDocument('buckets', $bucketId));
 
-        if ($bucket->isEmpty()
-            || (!$bucket->getAttribute('enabled') && $mode !== APP_MODE_ADMIN)) {
+        if (
+            $bucket->isEmpty()
+            || (!$bucket->getAttribute('enabled') && $mode !== APP_MODE_ADMIN)
+        ) {
             throw new Exception('Bucket not found', 404, Exception::STORAGE_BUCKET_NOT_FOUND);
         }
 
@@ -499,7 +500,7 @@ App::post('/v1/storage/buckets/:bucketId/files')
         }
 
         // Save to storage
-        $fileSize??=$deviceLocal->getFileSize($fileTmpName);
+        $fileSize ??= $deviceLocal->getFileSize($fileTmpName);
         $path = $deviceFiles->getPath($fileId . '.' . \pathinfo($fileName, PATHINFO_EXTENSION));
         $path = str_ireplace($deviceFiles->getRoot(), $deviceFiles->getRoot() . DIRECTORY_SEPARATOR . $bucket->getId(), $path); // Add bucket id to path after root
 
@@ -529,8 +530,10 @@ App::post('/v1/storage/buckets/:bucketId/files')
         $write = (is_null($write) && !$user->isEmpty()) ? ['user:' . $user->getId()] : $write ?? [];
         if ($chunksUploaded === $chunks) {
             if (App::getEnv('_APP_STORAGE_ANTIVIRUS') === 'enabled' && $bucket->getAttribute('antivirus', true) && $fileSize <= APP_LIMIT_ANTIVIRUS && App::getEnv('_APP_STORAGE_DEVICE', Storage::DEVICE_LOCAL) === Storage::DEVICE_LOCAL) {
-                $antivirus = new Network(App::getEnv('_APP_STORAGE_ANTIVIRUS_HOST', 'clamav'),
-                    (int) App::getEnv('_APP_STORAGE_ANTIVIRUS_PORT', 3310));
+                $antivirus = new Network(
+                    App::getEnv('_APP_STORAGE_ANTIVIRUS_HOST', 'clamav'),
+                    (int) App::getEnv('_APP_STORAGE_ANTIVIRUS_PORT', 3310)
+                );
 
                 if (!$antivirus->fileScan($path)) {
                     $deviceFiles->delete($path);
@@ -624,7 +627,6 @@ App::post('/v1/storage/buckets/:bucketId/files')
                     } else {
                         $file = $dbForProject->updateDocument('bucket_' . $bucket->getInternalId(), $fileId, $file);
                     }
-
                 }
             } catch (StructureException $exception) {
                 throw new Exception($exception->getMessage(), 400, Exception::DOCUMENT_INVALID_STRUCTURE);
@@ -641,7 +643,6 @@ App::post('/v1/storage/buckets/:bucketId/files')
                 ->setParam('storage.files.create', 1)
                 ->setParam('bucketId', $bucketId)
             ;
-
         } else {
             try {
                 if ($file->isEmpty()) {
@@ -726,8 +727,10 @@ App::get('/v1/storage/buckets/:bucketId/files')
 
         $bucket = Authorization::skip(fn () => $dbForProject->getDocument('buckets', $bucketId));
 
-        if ($bucket->isEmpty()
-            || (!$bucket->getAttribute('enabled') && $mode !== APP_MODE_ADMIN)) {
+        if (
+            $bucket->isEmpty()
+            || (!$bucket->getAttribute('enabled') && $mode !== APP_MODE_ADMIN)
+        ) {
             throw new Exception('Bucket not found', 404, Exception::STORAGE_BUCKET_NOT_FOUND);
         }
 
@@ -802,8 +805,10 @@ App::get('/v1/storage/buckets/:bucketId/files/:fileId')
 
         $bucket = Authorization::skip(fn () => $dbForProject->getDocument('buckets', $bucketId));
 
-        if ($bucket->isEmpty()
-            || (!$bucket->getAttribute('enabled') && $mode !== APP_MODE_ADMIN)) {
+        if (
+            $bucket->isEmpty()
+            || (!$bucket->getAttribute('enabled') && $mode !== APP_MODE_ADMIN)
+        ) {
             throw new Exception('Bucket not found', 404, Exception::STORAGE_BUCKET_NOT_FOUND);
         }
 
@@ -874,8 +879,10 @@ App::get('/v1/storage/buckets/:bucketId/files/:fileId/preview')
 
         $bucket = Authorization::skip(fn () => $dbForProject->getDocument('buckets', $bucketId));
 
-        if ($bucket->isEmpty()
-            || (!$bucket->getAttribute('enabled') && $mode !== APP_MODE_ADMIN)) {
+        if (
+            $bucket->isEmpty()
+            || (!$bucket->getAttribute('enabled') && $mode !== APP_MODE_ADMIN)
+        ) {
             throw new Exception('Bucket not found', 404, Exception::STORAGE_BUCKET_NOT_FOUND);
         }
 
@@ -916,7 +923,7 @@ App::get('/v1/storage/buckets/:bucketId/files/:fileId/preview')
         $mime = $file->getAttribute('mimeType');
 
         if (!\in_array($mime, $inputs) || $file->getAttribute('sizeActual') > (int) App::getEnv('_APP_STORAGE_PREVIEW_LIMIT', 20000000)) {
-            if(!\in_array($mime, $inputs)) {
+            if (!\in_array($mime, $inputs)) {
                 $path = (\array_key_exists($mime, $fileLogos)) ? $fileLogos[$mime] : $fileLogos['default'];
             } else {
                 // it was an image but the file size exceeded the limit
@@ -941,7 +948,7 @@ App::get('/v1/storage/buckets/:bucketId/files/:fileId/preview')
         $cache = new Cache(new Filesystem(APP_STORAGE_CACHE . DIRECTORY_SEPARATOR . 'app-' . $project->getId() . DIRECTORY_SEPARATOR . $bucketId . DIRECTORY_SEPARATOR . $fileId)); // Limit file number or size
         $data = $cache->load($key, 60 * 60 * 24 * 30 * 3/* 3 months */);
 
-        if(empty($output)) {
+        if (empty($output)) {
             // when file extension is not provided and the mime type is not one of our supported outputs
             // we fallback to `jpg` output format
             $output = empty($type) ? (array_search($mime, $outputs) ?? 'jpg') : $type;
@@ -1040,8 +1047,10 @@ App::get('/v1/storage/buckets/:bucketId/files/:fileId/download')
 
         $bucket = Authorization::skip(fn () => $dbForProject->getDocument('buckets', $bucketId));
 
-        if ($bucket->isEmpty()
-            || (!$bucket->getAttribute('enabled') && $mode !== APP_MODE_ADMIN)) {
+        if (
+            $bucket->isEmpty()
+            || (!$bucket->getAttribute('enabled') && $mode !== APP_MODE_ADMIN)
+        ) {
             throw new Exception('Bucket not found', 404, Exception::STORAGE_BUCKET_NOT_FOUND);
         }
 
@@ -1177,8 +1186,10 @@ App::get('/v1/storage/buckets/:bucketId/files/:fileId/view')
 
         $bucket = Authorization::skip(fn () => $dbForProject->getDocument('buckets', $bucketId));
 
-        if ($bucket->isEmpty()
-            || (!$bucket->getAttribute('enabled') && $mode !== APP_MODE_ADMIN)) {
+        if (
+            $bucket->isEmpty()
+            || (!$bucket->getAttribute('enabled') && $mode !== APP_MODE_ADMIN)
+        ) {
             throw new Exception('Bucket not found', 404, Exception::STORAGE_BUCKET_NOT_FOUND);
         }
 
@@ -1348,8 +1359,10 @@ App::put('/v1/storage/buckets/:bucketId/files/:fileId')
             }
         }
 
-        if ($bucket->isEmpty()
-            || (!$bucket->getAttribute('enabled') && $mode !== APP_MODE_ADMIN)) {
+        if (
+            $bucket->isEmpty()
+            || (!$bucket->getAttribute('enabled') && $mode !== APP_MODE_ADMIN)
+        ) {
             throw new Exception('Bucket not found', 404, Exception::STORAGE_BUCKET_NOT_FOUND);
         }
 
@@ -1423,8 +1436,10 @@ App::delete('/v1/storage/buckets/:bucketId/files/:fileId')
     ->action(function (string $bucketId, string $fileId, Response $response, Database $dbForProject, Event $events, Audit $audits, Stats $usage, string $mode, Device $deviceFiles, Document $project) {
         $bucket = Authorization::skip(fn () => $dbForProject->getDocument('buckets', $bucketId));
 
-        if ($bucket->isEmpty()
-            || (!$bucket->getAttribute('enabled') && $mode !== APP_MODE_ADMIN)) {
+        if (
+            $bucket->isEmpty()
+            || (!$bucket->getAttribute('enabled') && $mode !== APP_MODE_ADMIN)
+        ) {
             throw new Exception('Bucket not found', 404, Exception::STORAGE_BUCKET_NOT_FOUND);
         }
 
@@ -1564,10 +1579,10 @@ App::get('/v1/storage/usage')
                     }
 
                     // backfill metrics with empty values for graphs
-                    $backfill = $limit-\count($requestDocs);
+                    $backfill = $limit - \count($requestDocs);
                     while ($backfill > 0) {
                         $last = $limit - $backfill - 1; // array index of last added metric
-                        $diff = match($period) { // convert period to seconds for unix timestamp math
+                        $diff = match ($period) { // convert period to seconds for unix timestamp math
                             '30m' => 1800,
                             '1d' => 86400,
                         };
@@ -1673,10 +1688,10 @@ App::get('/v1/storage/:bucketId/usage')
                     }
 
                     // backfill metrics with empty values for graphs
-                    $backfill = $limit-\count($requestDocs);
+                    $backfill = $limit - \count($requestDocs);
                     while ($backfill > 0) {
                         $last = $limit - $backfill - 1; // array index of last added metric
-                        $diff = match($period) { // convert period to seconds for unix timestamp math
+                        $diff = match ($period) { // convert period to seconds for unix timestamp math
                             '30m' => 1800,
                             '1d' => 86400,
                         };

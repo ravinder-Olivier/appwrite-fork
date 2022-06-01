@@ -89,7 +89,10 @@ class TranscodingV1 extends Worker
         $ffprobe = FFMpeg\FFProbe::create([]);
         $ffmpeg = Streaming\FFMpeg::create([]);
 
-        $valid = $ffprobe->isValid($inPath);
+        if (!$ffprobe->isValid($inPath)) {
+            throw new Exception('Not an valid FFMpeg file "'.$inPath.'"');
+        }
+
         $sourceInfo = $this->getVideoInfo($ffprobe->streams($inPath));
 
         $video = $ffmpeg->open($inPath);
@@ -97,6 +100,7 @@ class TranscodingV1 extends Worker
         /** renditions loop */
 
         foreach (Config::getParam('renditions', []) as $rendition) {
+
             $query = Authorization::skip(function () use($database, $bucket, $rendition) {
                 return $database->createDocument('bucket_' . $bucket->getInternalId() . '_video_renditions', new Document([
                     'bucketId' => $this->args['bucketId'],
@@ -113,91 +117,107 @@ class TranscodingV1 extends Worker
                 ]));
             });
 
-            $representation = (new Representation)->
-                    setKiloBitrate($rendition['videoBitrate'])->
-                    setAudioKiloBitrate($rendition['audioBitrate'])->
-                    setResize($rendition['width'], $rendition['height']);
+            try {
+                $representation = (new Representation)->
+                        setKiloBitrate($rendition['videoBitrate'])->
+                        setAudioKiloBitrate($rendition['audioBitrate'])->
+                        setResize($rendition['width'], $rendition['height']);
 
-                $format = new Streaming\Format\X264();
-                $format->on('progress', function ($video, $format, $percentage) use ($database){});
+                    $format = new Streaming\Format\X264();
+                    $format->on('progress', function ($video, $format, $percentage) use ($database){});
 
-            /** Create HLS */
-            $hls = $video->hls()
-                ->setFormat($format)
-                ->setAdditionalParams(['-vf', 'scale=iw:-2:force_original_aspect_ratio=increase,setsar=1:1'])
-                ->setHlsBaseUrl(self::HLS_BASE_URL)
-                ->setHlsTime(10)
-                ->setHlsAllowCache(false)
-                ->addRepresentations([$representation])
-                ->save($this->outPath);
+                /** Create HLS */
+                $hls = $video->hls()
+                    ->setFormat($format)
+                    ->setAdditionalParams(['-vf', 'scale=iw:-2:force_original_aspect_ratio=increase,setsar=1:1'])
+                    ->setHlsBaseUrl(self::HLS_BASE_URL)
+                    ->setHlsTime(10)
+                    ->setHlsAllowCache(false)
+                    ->addRepresentations([$representation])
+                    ->save($this->outPath);
 
-            /** m3u8 master playlist */
-            $renditions[] = $rendition;
-            $m3u8 = $this->getHlsMasterPlaylist($renditions, $this->args['fileId']);
-            file_put_contents($this->outDir . $this->args['fileId'].'.m3u8', $m3u8, LOCK_EX);
+                /** m3u8 master playlist */
+                $renditions[] = $rendition;
+                $m3u8 = $this->getHlsMasterPlaylist($renditions, $this->args['fileId']);
+                file_put_contents($this->outDir . $this->args['fileId'].'.m3u8', $m3u8, LOCK_EX);
 
-            $metadata = $hls->metadata()->export();
-            if(!empty($metadata['stream']['resolutions'][0])){
-                $info = $metadata['stream']['resolutions'][0];
-                $query->setAttribute('metadata', json_encode([
-                    'resolution'    => $info['dimension'],
-                    'videoBitrate' => $info['video_kilo_bitrate'],
-                    'audioBitrate' => $info['audio_kilo_bitrate'],
-                ]));
-            }
+                $metadata = $hls->metadata()->export();
+                if(!empty($metadata['stream']['resolutions'][0])){
+                    $info = $metadata['stream']['resolutions'][0];
+                    $query->setAttribute('metadata', json_encode([
+                        'resolution'    => $info['dimension'],
+                        'videoBitrate' => $info['video_kilo_bitrate'],
+                        'audioBitrate' => $info['audio_kilo_bitrate'],
+                    ]));
+                }
 
-            $query->setAttribute('status', 'transcoding ended');
-            $query->setAttribute('timeEnded', time());
-            Authorization::skip(fn () => $database->updateDocument(
-                'bucket_' . $bucket->getInternalId() . '_video_renditions',
-                $query->getId(),
-                $query
+                $query->setAttribute('status', 'transcoding ended');
+                $query->setAttribute('timeEnded', time());
+                Authorization::skip(fn () => $database->updateDocument(
+                    'bucket_' . $bucket->getInternalId() . '_video_renditions',
+                    $query->getId(),
+                    $query
+                    ));
+
+
+                /** Upload & remove files **/
+                $start = 0;
+                $fileNames = scandir($this->outDir);
+
+                foreach($fileNames as $fileName) {
+
+                    if($fileName === '.' || $fileName === '..'){
+                        continue;
+                    }
+
+                    $deviceFiles  = $this->getVideoDevice($project->getId());
+                    $devicePath   = $deviceFiles->getPath($this->args['fileId']);
+                    $devicePath   = str_ireplace($deviceFiles->getRoot(), $deviceFiles->getRoot() . DIRECTORY_SEPARATOR . $bucket->getId(), $devicePath);
+                    $data = $this->getFilesDevice($project->getId())->read($this->outDir. $fileName);
+                    $this->getVideoDevice($project->getId())->write($devicePath. DIRECTORY_SEPARATOR . $fileName, $data, \mime_content_type($this->outDir. $fileName));
+
+                    if($start === 0){
+                        $query->setAttribute('status', 'uploading');
+                        Authorization::skip(fn () => $database->updateDocument(
+                           'bucket_' . $bucket->getInternalId() . '_video_renditions',
+                           $query->getId(),
+                           $query
+                        ));
+                       $start = 1;
+                    }
+
+                    //$metadata=[];
+                    //$chunksUploaded = $deviceFiles->upload($file, $path, -1, 1, $metadata);
+                    //var_dump($chunksUploaded);
+                    // if (empty($chunksUploaded)) {
+                    //  throw new Exception('Failed uploading file', 500, Exception::GENERAL_SERVER_ERROR);
+                    //}
+                    // }
+
+                    @unlink($this->outDir. $fileName);
+                }
+
+                $query->setAttribute('status', 'ready');
+                Authorization::skip(fn () => $database->updateDocument(
+                    'bucket_' . $bucket->getInternalId() . '_video_renditions',
+                    $query->getId(),
+                    $query
                 ));
 
+            } catch(\Throwable $th) {
 
-            /** Upload & remove files **/
-            $start = 0;
-            $fileNames = scandir($this->outDir);
-            
-            foreach($fileNames as $fileName) {
+                $query->setAttribute('metadata', json_encode([
+                    'code' => $th->getCode(),
+                    'message' => $th->getMessage(),
+                ]));
 
-                if($fileName === '.' || $fileName === '..'){
-                    continue;
-                }
-
-                $deviceFiles  = $this->getVideoDevice($project->getId());
-                $devicePath   = $deviceFiles->getPath($this->args['fileId']);
-                $devicePath   = str_ireplace($deviceFiles->getRoot(), $deviceFiles->getRoot() . DIRECTORY_SEPARATOR . $bucket->getId(), $devicePath);
-                $data = $this->getFilesDevice($project->getId())->read($this->outDir. $fileName);
-                $this->getVideoDevice($project->getId())->write($devicePath. DIRECTORY_SEPARATOR . $fileName, $data, \mime_content_type($this->outDir. $fileName));
-
-                if($start === 0){
-                    $query->setAttribute('status', 'uploading');
-                    Authorization::skip(fn () => $database->updateDocument(
-                       'bucket_' . $bucket->getInternalId() . '_video_renditions',
-                       $query->getId(),
-                       $query
-                    ));
-                   $start = 1;
-                }
-
-                //$metadata=[];
-                //$chunksUploaded = $deviceFiles->upload($file, $path, -1, 1, $metadata);
-                //var_dump($chunksUploaded);
-                // if (empty($chunksUploaded)) {
-                //  throw new Exception('Failed uploading file', 500, Exception::GENERAL_SERVER_ERROR);
-                //}
-                // }
-
-                @unlink($this->outDir. $fileName);
+                $query->setAttribute('status', 'error');
+                Authorization::skip(fn() => $database->updateDocument(
+                    'bucket_' . $bucket->getInternalId() . '_video_renditions',
+                    $query->getId(),
+                    $query
+                ));
             }
-
-            $query->setAttribute('status', 'ready');
-            Authorization::skip(fn () => $database->updateDocument(
-                'bucket_' . $bucket->getInternalId() . '_video_renditions',
-                $query->getId(),
-                $query
-            ));
         }
     }
 
