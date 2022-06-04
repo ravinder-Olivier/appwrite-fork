@@ -8,6 +8,7 @@ use Utopia\App;
 use Utopia\CLI\Console;
 use Utopia\Config\Config;
 use Utopia\Database\Document;
+use Utopia\Database\Query;
 use Utopia\Database\Validator\Authorization;
 use \FFMpeg\FFProbe\DataMapping\StreamCollection;
 use Utopia\Storage\Compression\Algorithms\GZIP;
@@ -67,6 +68,7 @@ class TranscodingV1 extends Worker
         $data = $this->getFilesDevice($project->getId())->read($file->getAttribute('path'));
         $fileName    = basename($file->getAttribute('path'));
         $inPath      =  $this->inDir . $fileName;
+        $collection = 'bucket_' . $bucket->getInternalId() . '_video_renditions';
 
         if (!empty($file->getAttribute('openSSLCipher'))) { // Decrypt
             $data = OpenSSL::decrypt(
@@ -93,15 +95,31 @@ class TranscodingV1 extends Worker
             throw new Exception('Not an valid FFMpeg file "'.$inPath.'"');
         }
 
-        $sourceInfo = $this->getVideoInfo($ffprobe->streams($inPath));
+        //TODO Can you retranscode?
+        $queries = [
+            new Query('bucketId', Query::TYPE_EQUAL, [$this->args['bucketId']]),
+            new Query('fileId', Query::TYPE_EQUAL, [$this->args['fileId']])
+        ];
 
+        $renditions = Authorization::skip(fn () => $database->find($collection, $queries, 12, 0, [], ['ASC']));
+        if(!empty($renditions)) {
+            foreach ($renditions as $rendition) {
+                Authorization::skip(fn() => $database->deleteDocument($collection, $rendition->getId()));
+            }
+
+            $deviceFiles = $this->getVideoDevice($project->getId());
+            $devicePath = $deviceFiles->getPath($this->args['fileId']);
+            $devicePath = str_ireplace($deviceFiles->getRoot(), $deviceFiles->getRoot() . DIRECTORY_SEPARATOR . $bucket->getId(), $devicePath);
+            $deviceFiles->deletePath($devicePath);
+        }
+
+
+        $sourceInfo = $this->getVideoInfo($ffprobe->streams($inPath));
         $video = $ffmpeg->open($inPath);
         $renditions = [];
         /** renditions loop */
 
         foreach (Config::getParam('renditions', []) as $rendition) {
-
-            $collection = 'bucket_' . $bucket->getInternalId() . '_video_renditions';
 
             $query = Authorization::skip(function () use($database, $collection, $rendition) {
                 return $database->createDocument($collection, new Document([
@@ -122,13 +140,14 @@ class TranscodingV1 extends Worker
 
                     $format = new Streaming\Format\X264();
                     $format->on('progress', function ($video, $format, $percentage) use ($database, $query, $collection){
-                        var_dump($percentage);
-                        $query->setAttribute('progress', (string)$percentage);
-                        Authorization::skip(fn () => $database->updateDocument(
-                            $collection,
-                            $query->getId(),
-                            $query
-                        ));
+                        if($percentage % 3 === 0) {
+                            $query->setAttribute('progress', (string)$percentage);
+                            Authorization::skip(fn() => $database->updateDocument(
+                                $collection,
+                                $query->getId(),
+                                $query
+                            ));
+                        }
                     });
 
                 /** Create HLS */
@@ -147,12 +166,16 @@ class TranscodingV1 extends Worker
                 file_put_contents($this->outDir . $this->args['fileId'].'.m3u8', $m3u8, LOCK_EX);
 
                 $metadata = $hls->metadata()->export();
+
+                //$x = $this->getMetadataExport($metadata);
+                //var_dump($metadata);
+
                 if(!empty($metadata['stream']['resolutions'][0])){
                     $info = $metadata['stream']['resolutions'][0];
                     $query->setAttribute('metadata', json_encode([
                         'resolution'    => $info['dimension'],
-                        'videoBitrate' => $info['video_kilo_bitrate'],
-                        'audioBitrate' => $info['audio_kilo_bitrate'],
+                        'videoBitrate'  => $info['video_kilo_bitrate'],
+                        'audioBitrate'  => $info['audio_kilo_bitrate'],
                     ]));
                 }
 
@@ -169,8 +192,10 @@ class TranscodingV1 extends Worker
                 $fileNames = scandir($this->outDir);
 
                 foreach($fileNames as $fileName) {
-
-                    if($fileName === '.' || $fileName === '..'){
+                    if($fileName === '.' ||
+                        $fileName === '..' ||
+                        str_contains($fileName, '.json')
+                    ){
                         continue;
                     }
 
@@ -242,6 +267,38 @@ class TranscodingV1 extends Worker
         }
         return $m3u8;
     }
+
+    /**
+     * @param $metadata array
+     * @return array
+     */
+    private function getMetadataExport(array $metadata): array
+    {
+        $info = [];
+
+        if(!empty($metadata['stream']['resolutions'][0])){
+            $general = $metadata['stream']['resolutions'][0];
+            $info['resolution']    = $general['dimension'];
+            $info['videoBitrate']  = $general['video_kilo_bitrate'];
+            $info['audioBitrate']  = $general['audio_kilo_bitrate'];
+        }
+
+        if(!empty($metadata['video']['streams'])) {
+            foreach ($metadata['video']['streams'] as $streams) {
+                if ($streams['codec_type'] === 'video') {
+                    $info['codecName'] = $streams['codec_name'];
+                    $info['duration']  = $streams['duration'];
+                    $info['codecName'] = $streams['codec_name'];
+                    $info['avgFrameRate'] = $streams['avg_frame_rate'];
+
+                }
+            }
+        }
+
+        return $info;
+    }
+
+
 
 
     /**

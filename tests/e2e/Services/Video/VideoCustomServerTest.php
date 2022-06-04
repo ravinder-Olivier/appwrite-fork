@@ -13,7 +13,7 @@ class VideoCustomServerTest extends Scope
     use ProjectCustom;
     use SideServer;
 
-    public function testTranscoding()
+    public function testTranscoding() :array
     {
 
 //        $bucket = $this->client->call(Client::METHOD_POST, '/storage/buckets', [
@@ -86,9 +86,29 @@ class VideoCustomServerTest extends Scope
             'write' => ['role:all']
         ]);
 
-      var_dump($transcoding['body']);
-
-
+        return [
+            'projectId' => $pid,
+            'apiKey' => $key,
+            'bucketId' => $bid,
+            'fileId' => $fid,
+        ];
     }
 
+
+    public function testRenditions() :void
+    {
+
+        $pid = '62978329ce7b1dda09b6';
+        $key = '44dc30ee13439c08b74891f94bf1c6b10602682b13bafaa497cba3b1f7bb1003e95da4e0cbc4f94143198ca40b502281435b3671affdea372a24404edaf4df550ec94bb763205348becf9257ebbef43732bdbd7d9dac00011ba9fcb44c117c635de75dc9ae9e60ef4d34fa9c6fdc43acc67d9918c9e28ffb53b2d2f17daa6426';
+        $fid = '6297832b75f59440ab52';
+        $bid = '6297832a318cbed41894';
+
+
+        $renditions = $this->client->call(Client::METHOD_GET, '/video/buckets/' . $bid.'/files/'.  $fid .'/renditions',[
+            'content-type' => 'application/json',
+            'x-appwrite-project' => $pid,
+            'x-appwrite-key' =>  $key,
+        ]);
+         var_dump($renditions['body']);
     }
+}

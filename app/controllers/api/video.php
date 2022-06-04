@@ -163,10 +163,28 @@ App::get('/v1/video/buckets/:bucketId/files/:fileId/renditions')
             throw new Exception('File not found', 404, Exception::STORAGE_FILE_NOT_FOUND);
         }
 
-        $usage
-            ->setParam('storage.files.read', 1)
-            ->setParam('bucketId', $bucketId)
-        ;
+        $queries = [
+            new Query('bucketId', Query::TYPE_EQUAL, [$bucketId]),
+            new Query('fileId', Query::TYPE_EQUAL, [$fileId])
+        ];
 
-        $response->dynamic($file, Response::MODEL_FILE);
+        $renditions = Authorization::skip(fn () => $dbForProject->find('bucket_' . $bucket->getInternalId(). '_video_renditions', $queries, 12, 0, [], ['ASC']));
+        $stream = 'Not available';
+        foreach ($renditions as $rendition) {
+                if('ready' === $rendition->getAttribute('status')){
+                    $stream = 'http://localhost/videos/' . $fileId . 'm3u8';
+                    break;
+                }
+         }
+
+        $response->json([
+            'stream' => $stream,
+            'renditions' => $renditions
+        ]);
+
+//        $response->dynamic(new Document([
+//            'total' => $dbForProject->count('bucket_' . $bucket->getInternalId(). '_video_renditions', $queries, APP_LIMIT_COUNT),
+//            'renditions' => $renditions,
+//        ]), Response::MODEL_FILE_RENDITIONS_LIST);
+
     });
